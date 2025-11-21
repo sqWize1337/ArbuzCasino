@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TON Gifts Battle</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- FIREBASE IMPORTS -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, limit, orderBy, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase objects globally for the main script
+        window.firebase = {
+            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+            getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, limit, orderBy, addDoc, setLogLevel
+        };
+    </script>
+    
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        bg: '#0f111a',
+                        surface: '#1a1d2b',
+                        surface2: '#23273a',
+                        ton: '#0098EA',
+                        accent: '#0098EA',
+                        win: '#fbbf24',
+                        danger: '#ef4444',
+                        success: '#22c55e'
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s infinite',
+                        'float': 'float 3s ease-in-out infinite',
+                        'spin-slow': 'spin 10s linear infinite',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #0f111a;
+            color: white;
+            -webkit-tap-highlight-color: transparent;
+            overflow-x: hidden;
+            overscroll-behavior: none;
+        }
+
+        /* Fix case scrolling */
+        #cases-grid-container {
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .roulette-mask {
+            mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+            -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+        }
+        .roulette-marker {
+            position: absolute; left: 50%; top: 0; bottom: 0; width: 4px; background: #eab308; z-index: 30; transform: translateX(-50%); box-shadow: 0 0 20px #eab308;
+        }
+        .roulette-marker::after, .roulette-marker::before {
+            content: ''; position: absolute; left: -6px; border-left: 8px solid transparent; border-right: 8px solid transparent;
+        }
+        .roulette-marker::after { top: -5px; border-top: 10px solid #eab308; }
+        .roulette-marker::before { bottom: -5px; border-bottom: 10px solid #eab308; }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* NFT Gradients */
+        .nft-common { background: radial-gradient(circle at center, rgba(156, 163, 175, 0.2), rgba(0,0,0,0)); border: 1px solid #4b5563; }
+        .nft-rare { background: radial-gradient(circle at center, rgba(59, 130, 246, 0.2), rgba(0,0,0,0)); border: 1px solid #3b82f6; }
+        .nft-epic { background: radial-gradient(circle at center, rgba(168, 85, 247, 0.25), rgba(0,0,0,0)); border: 1px solid #a855f7; box-shadow: 0 0 15px rgba(168, 85, 247, 0.1); }
+        .nft-legendary { background: radial-gradient(circle at center, rgba(234, 179, 8, 0.3), rgba(0,0,0,0)); border: 1px solid #eab308; box-shadow: 0 0 25px rgba(234, 179, 8, 0.2); }
+        
+        /* Custom Glass */
+        .glass { background: rgba(26, 29, 43, 0.8); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- --- STEP 1: AUTH SCREEN --- -->
+    <div id="screen-auth" class="fixed inset-0 z-[100] bg-bg flex flex-col items-center justify-center p-6">
+        <div class="w-24 h-24 bg-ton rounded-2xl flex items-center justify-center mb-6 shadow-[0_0_40px_#0098EA]">
+            <i data-lucide="gift" class="w-12 h-12 text-white"></i>
+        </div>
+        <h1 class="text-3xl font-bold mb-2 text-center">TON Gifts<br><span class="text-ton">Battle</span></h1>
+        <p class="text-gray-400 text-center mb-10 text-sm">Win exclusive Telegram NFT gifts.</p>
+        
+        <button onclick="handleTelegramLogin()" class="w-full max-w-xs py-4 bg-[#24A1DE] hover:bg-[#208ebf] rounded-xl font-bold flex items-center justify-center gap-3 transition-transform active:scale-95">
+            <i data-lucide="send" class="w-5 h-5"></i>
+            Войти через Telegram
+        </button>
+    </div>
+
+    <!-- --- STEP 2: WALLET CONNECT --- -->
+    <div id="screen-wallet" class="fixed inset-0 z-[90] bg-bg hidden flex-col items-center justify-center p-6">
+        <h2 class="text-2xl font-bold mb-2">Подключение кошелька</h2>
+        <p class="text-gray-400 text-center mb-8 text-sm max-w-xs">Подключите TON-кошелек для пополнения и вывода средств.</p>
+        
+        <div id="ton-connect-btn" class="mb-6"></div> <!-- TonConnect UI renders here -->
+        
+        <button onclick="skipWallet()" class="text-gray-500 text-xs underline mt-4">Продолжить без кошелька (Только просмотр)</button>
+    </div>
+
+    <!-- --- MAIN APP --- -->
+    <div id="screen-app" class="hidden min-h-screen flex-col pb-20">
+        
+        <!-- HEADER -->
+        <header class="sticky top-0 z-40 glass border-b border-white/5 px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div id="user-avatar" class="w-10 h-10 rounded-full bg-surface2 border border-white/10 overflow-hidden"></div>
+                <div>
+                    <div id="user-name" class="text-xs text-gray-400 font-medium">User</div>
+                    <div class="font-bold text-sm leading-none flex items-center gap-1 cursor-pointer" onclick="openDepositModal()">
+                        <span id="balance" class="text-white text-lg">0.00</span> 
+                        <img src="https://ton.org/download/ton_symbol.svg" class="w-4 h-4" alt="TON">
+                        <div class="bg-ton/20 p-0.5 rounded ml-1"><i data-lucide="plus" class="w-3 h-3 text-ton"></i></div>
+                    </div>
+                </div>
+            </div>
+            <button onclick="openMenu()" class="p-2 bg-surface rounded-lg"><i data-lucide="menu" class="w-5 h-5"></i></button>
+        </header>
+
+        <!-- LIVE FEED (MULTIPLAYER) -->
+        <div class="bg-black/30 border-b border-white/5 h-14 flex items-center overflow-hidden relative">
+            <div class="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-bg to-transparent z-10"></div>
+            <div class="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-bg to-transparent z-10"></div>
+            <div id="live-feed" class="flex gap-3 px-4 items-center whitespace-nowrap overflow-x-scroll no-scrollbar">
+                <!-- JS Injects items here -->
+            </div>
+        </div>
+
+        <!-- VIEWER -->
+        <main id="app-view" class="flex-1 p-4 w-full max-w-md mx-auto">
+            <!-- Dynamic Content -->
+        </main>
+
+        <!-- NAVIGATION -->
+        <nav class="fixed bottom-0 left-0 right-0 glass border-t border-white/5 pb-safe px-4 flex justify-around items-center z-40 h-20">
+            <button onclick="router.push('cases')" id="nav-cases" class="flex-1 flex flex-col items-center gap-1 text-ton transition-colors">
+                <i data-lucide="box" class="w-6 h-6"></i>
+                <span class="text-[10px] font-bold">Кейсы</span>
+            </button>
+            <button onclick="router.push('inventory')" id="nav-inventory" class="flex-1 flex flex-col items-center gap-1 text-gray-500 transition-colors">
+                <i data-lucide="layers" class="w-6 h-6"></i>
+                <span class="text-[10px] font-bold">NFT</span>
+            </button>
+            <button onclick="router.push('wallet')" id="nav-wallet" class="flex-1 flex flex-col items-center gap-1 text-gray-500 transition-colors">
+                <i data-lucide="wallet" class="w-6 h-6"></i>
+                <span class="text-[10px] font-bold">Кошелек</span>
+            </button>
+            <button onclick="router.push('referral')" id="nav-referral" class="flex-1 flex flex-col items-center gap-1 text-gray-500 transition-colors">
+                <i data-lucide="users" class="w-6 h-6"></i>
+                <span class="text-[10px] font-bold">Реф.</span>
+            </button>
+            <button onclick="router.push('support')" id="nav-support" class="flex-1 flex flex-col items-center gap-1 text-gray-500 transition-colors">
+                <i data-lucide="help-circle" class="w-6 h-6"></i>
+                <span class="text-[10px] font-bold">Поддержка</span>
+            </button>
+            <button onclick="router.push('admin')" id="nav-admin" class="flex-1 flex-col items-center gap-1 text-red-500 transition-colors hidden">
+                <i data-lucide="shield" class="w-6 h-6"></i>
+                <span class="text-[10px] font-bold">Админ</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- --- MODALS --- -->
+
+    <!-- FULL SCREEN CASE PREVIEW -->
+    <div id="modal-preview" class="fixed inset-0 z-50 bg-bg hidden flex-col animate-fade-in">
+        <!-- Top Bar -->
+        <div class="p-4 flex justify-between items-center bg-surface/50 backdrop-blur-md z-10 border-b border-white/5">
+            <button onclick="closeModal('modal-preview')" class="p-2 bg-white/5 rounded-full"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <div class="flex items-center gap-2">
+                <span id="preview-balance" class="font-mono text-sm">0.00</span>
+                <img src="https://ton.org/download/ton_symbol.svg" class="w-4 h-4">
+            </div>
+        </div>
+
+        <!-- Case Content -->
+        <div class="flex-1 overflow-y-auto p-4 pb-32">
+            <div class="text-center mb-8 mt-4">
+                <div id="preview-image" class="text-[80px] mb-4 animate-float inline-block drop-shadow-[0_0_30px_rgba(0,152,234,0.3)]">📦</div>
+                <h2 id="preview-title" class="text-3xl font-bold text-white mb-1">Case Name</h2>
+                <p class="text-ton text-sm font-medium uppercase tracking-widest">Contains NFT Gifts</p>
+            </div>
+
+            <div class="grid grid-cols-3 gap-3" id="preview-grid">
+                <!-- Items injected here -->
+            </div>
+        </div>
+
+        <!-- Bottom Action -->
+        <div class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-bg via-bg to-transparent pb-10">
+            <button id="btn-open-case" class="w-full py-4 bg-ton hover:bg-blue-500 text-white text-lg font-bold rounded-xl shadow-[0_0_20px_rgba(0,152,234,0.4)] active:scale-95 transition-all flex justify-center items-center gap-2">
+                Открыть за <span id="preview-price">1</span> <img src="https://ton.org/download/ton_symbol.svg" class="w-5 h-5 invert brightness-0">
+            </button>
+        </div>
+    </div>
+
+    <!-- ROULETTE MODAL -->
+    <div id="modal-roulette" class="fixed inset-0 z-[60] bg-bg hidden flex-col justify-center items-center">
+        <h2 class="text-2xl font-bold mb-2 text-ton uppercase tracking-widest animate-pulse">Крутим...</h2>
+        
+        <div class="relative w-full h-48 bg-surface/50 border-y border-ton/30 mb-12 flex items-center overflow-hidden">
+            <div class="roulette-marker"></div>
+            <div class="w-full h-full flex items-center roulette-mask">
+                <div id="roulette-strip" class="flex gap-4 px-[50%] will-change-transform">
+                    <!-- Cards injected -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WIN MODAL -->
+    <div id="modal-win" class="fixed inset-0 z-[70] bg-black/90 backdrop-blur-xl hidden flex-col items-center justify-center p-8 animate-fade-in">
+        <div class="relative w-full max-w-sm text-center">
+            <!-- Glow -->
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-ton/30 blur-[100px] rounded-full pointer-events-none"></div>
+            
+            <div id="win-icon" class="text-[120px] mb-8 relative z-10 drop-shadow-2xl animate-float">🎁</div>
+            
+            <div class="relative z-10 mb-8">
+                <div id="win-rarity" class="text-sm font-bold text-ton uppercase tracking-[0.2em] mb-2">Rare NFT</div>
+                <h2 id="win-name" class="text-4xl font-black text-white mb-2 leading-tight">Item Name</h2>
+                <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full border border-white/10">
+                    <span class="text-gray-400 text-xs uppercase">Рыночная стоимость</span>
+                    <span id="win-price" class="text-white font-mono font-bold">500</span> 
+                    <img src="https://ton.org/download/ton_symbol.svg" class="w-3 h-3">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 relative z-10 w-full">
+                <button onclick="sellWin()" class="py-4 rounded-xl bg-surface border border-white/10 hover:bg-white/5 font-bold text-gray-300">Продать</button>
+                <button onclick="keepWin()" class="py-4 rounded-xl bg-ton hover:bg-blue-500 font-bold text-white shadow-lg shadow-ton/30">Оставить NFT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEPOSIT MODAL -->
+    <div id="modal-deposit" class="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm hidden flex-col items-end justify-end sm:justify-center sm:items-center">
+        <div class="bg-surface border border-white/10 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-6 animate-slide-up">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold">Пополнение TON</h3>
+                <button onclick="closeModal('modal-deposit')" class="p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            
+            <p class="text-sm text-gray-400 mb-4">Для пополнения подключите кошелек. Мы симулируем отправку 10 TON.</p>
+
+            <button onclick="simulateDeposit()" class="w-full py-3 bg-green-600 rounded-xl font-bold hover:bg-green-700 transition-colors">Simulate Deposit (+10 TON)</button>
+        </div>
+    </div>
+    
+    <!-- WITHDRAW MODAL -->
+    <div id="modal-withdraw" class="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm hidden flex-col items-end justify-end sm:justify-center sm:items-center">
+        <div class="bg-surface border border-white/10 w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-6 animate-slide-up">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold">Вывод TON</h3>
+                <button onclick="closeModal('modal-withdraw')" class="p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            
+            <p class="text-sm text-gray-400 mb-4">Вывод средств доступен только на привязанный TON-кошелек: <span id="withdraw-address" class="font-mono text-xs text-ton truncate"></span></p>
+            
+            <label for="withdraw-amount" class="block text-sm font-medium mb-1">Сумма в TON</label>
+            <input type="number" id="withdraw-amount" value="5" min="1" class="w-full bg-surface2 p-3 rounded-lg border border-white/10 focus:ring-ton focus:border-ton mb-6">
+
+            <button onclick="simulateWithdrawal()" class="w-full py-3 bg-red-600 rounded-xl font-bold hover:bg-red-700 transition-colors">Simulate Withdrawal</button>
+        </div>
+    </div>
+
+    <!-- JS LOGIC -->
+    <script type="module">
+        // --- DATA CONFIG (TELEGRAM GIFTS) ---
+        const NFTS = [
+            { id: 1, name: 'Delicious Cake', price: 0.5, rarity: 'common', icon: '🎂', color: 'text-gray-400' },
+            { id: 2, name: 'Green Star', price: 1.0, rarity: 'common', icon: '⭐', color: 'text-green-400' },
+            { id: 3, name: 'Coffee Cup', price: 0.8, rarity: 'common', icon: '☕', color: 'text-gray-400' },
+            { id: 4, name: 'Blue Star', price: 5.0, rarity: 'rare', icon: '🌟', color: 'text-blue-400' },
+            { id: 5, name: 'Red Star', price: 8.0, rarity: 'rare', icon: '✴️', color: 'text-red-500' },
+            { id: 6, name: 'Magic Potion', price: 3.5, rarity: 'rare', icon: '🧪', color: 'text-purple-400' },
+            { id: 7, name: 'Spicy Pepper', price: 25.0, rarity: 'epic', icon: '🌶️', color: 'text-red-600' },
+            { id: 8, name: 'Plush Pepe', price: 80.0, rarity: 'epic', icon: '🐸', color: 'text-green-500' },
+            { id: 9, name: 'Diamond Ring', price: 50.0, rarity: 'epic', icon: '💍', color: 'text-cyan-300' },
+            { id: 10, name: 'Gold Star', price: 250.0, rarity: 'legendary', icon: '💫', color: 'text-yellow-400' },
+            { id: 11, name: 'Violet Star', price: 500.0, rarity: 'legendary', icon: '🔯', color: 'text-purple-500' },
+            { id: 12, name: 'Rich Duck', price: 1000.0, rarity: 'legendary', icon: '🦆', color: 'text-yellow-300' }
+        ];
+
+        const CASES = [
+            { id: 'starter', name: 'Starter Gift Box', price: 2, image: '🎁', drops: [1, 2, 3, 4] },
+            { id: 'stars', name: 'Stars Collection', price: 10, image: '✨', drops: [2, 4, 5, 10, 11] },
+            { id: 'premium', name: 'Premium Gifts', price: 50, image: '💎', drops: [6, 7, 8, 9] },
+            { id: 'limited', name: 'Limited Edition', price: 150, image: '👑', drops: [8, 9, 10, 11, 12] }
+        ];
+
+        const BOTS = ["CryptoWhale", "Pavel_D", "NotcoinUser", "TonUser_88", "Alice", "Bob_TON"];
+        const ADMIN_ID = 'admin-test-id'; // Хардкодим тестовый ID администратора
+
+        // --- GLOBAL STATE & FIREBASE ---
+        let db, auth, tonConnectUI;
+        let userId = 'loading';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        
+        const state = {
+            user: {
+                id: null,
+                username: null,
+                balance: 0.00,
+                inventory: [],
+                wallet: null,
+                isAdmin: false,
+                referralLink: ''
+            },
+            currentCase: null,
+            winItem: null,
+            isAuthReady: false,
+            feedItems: [],
+            stats: { totalProfit: 0, totalLoss: 0, totalCases: 0, topWinners: [] }
+        };
+
+        // --- FIREBASE INIT ---
+        window.onload = async () => {
+            const { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, getFirestore, onAuthStateChanged, setLogLevel } = window.firebase;
+            const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+            const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+            if (Object.keys(firebaseConfig).length === 0) {
+                 console.error("Firebase config is missing.");
+                 return;
+            }
+
+            // setLogLevel('debug'); // Optional: Enable Firebase debug logs
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebase Auth Error:", error);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    state.user.id = user.uid;
+                    
+                    // Check for admin role (simple hardcoded check)
+                    state.user.isAdmin = (userId === ADMIN_ID);
+                    if (state.user.isAdmin) {
+                        document.getElementById('nav-admin').classList.remove('hidden');
+                        document.getElementById('nav-admin').classList.add('flex');
+                    }
+
+                    state.isAuthReady = true;
+                    // Only start core app functionality after auth is ready
+                    handleAppStart();
+                    setupFirestoreListeners();
+                } else {
+                    console.log("User signed out or anonymous.");
+                }
+            });
+        };
+
+        function handleAppStart() {
+            // Load Telegram Web App data
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+
+            if (tg.initDataUnsafe?.user) {
+                state.user.username = tg.initDataUnsafe.user.first_name || "Пользователь";
+                document.getElementById('user-avatar').innerHTML = `<img src="${tg.initDataUnsafe.user.photo_url || 'https://api.dicebear.com/7.x/avataaars/svg'}" class="w-full h-full">`;
+            } else {
+                state.user.username = `Guest_${userId.substring(0, 4)}`;
+                document.getElementById('user-avatar').innerHTML = `<div class="w-full h-full bg-ton flex items-center justify-center">G</div>`;
+            }
+        }
+
+        async function setupFirestoreListeners() {
+            if (!state.isAuthReady || !db || !userId) return;
+
+            // 1. User Profile Listener (Private Data)
+            const { doc, setDoc, onSnapshot, collection } = window.firebase;
+            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/data/profile`, 'userDoc');
+            
+            // Check if document exists, create if not
+            const userDocSnap = await window.firebase.getDoc(userDocRef);
+            if (!userDocSnap.exists()) {
+                await setDoc(userDocRef, {
+                    balance: 15.00,
+                    inventory: [],
+                    username: state.user.username,
+                    totalWins: 0,
+                    totalLosses: 0,
+                    lastUpdate: new Date()
+                });
+            }
+
+            onSnapshot(userDocRef, (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    state.user.balance = data.balance || 0;
+                    state.user.inventory = data.inventory || [];
+                    state.user.username = data.username || state.user.username;
+                    updateUI();
+                }
+            }, (error) => {
+                console.error("Error reading user profile:", error);
+            });
+
+            // 2. Live Feed Listener (Public Data)
+            const feedColRef = collection(db, `artifacts/${appId}/public/data/feed`);
+            const feedQuery = window.firebase.query(feedColRef, window.firebase.orderBy('timestamp', 'desc'), window.firebase.limit(10));
+
+            onSnapshot(feedQuery, (snapshot) => {
+                state.feedItems = snapshot.docs.map(d => d.data());
+                renderLiveFeed();
+            }, (error) => {
+                console.error("Error reading feed:", error);
+            });
+            
+            // 3. Admin Stats (Simple Mock, needs real logic for production)
+            if (state.user.isAdmin) {
+                state.stats.topWinners = [
+                    { name: 'UserA', wins: 15, profit: 850 },
+                    { name: 'UserB', wins: 10, profit: 320 }
+                ];
+                state.stats.totalProfit = 2500;
+                state.stats.totalLoss = 1200;
+                state.stats.totalCases = 150;
+            }
+
+            // Initialize TonConnect UI
+            tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+                manifestUrl: 'https://ton-connect.github.io/demo-dapp-with-react-ui/tonconnect-manifest.json',
+                buttonRootId: 'ton-connect-btn'
+            });
+
+            tonConnectUI.onStatusChange(wallet => {
+                if (wallet) {
+                    state.user.wallet = wallet.account.address;
+                    state.user.walletIsConnected = true;
+                    if (document.getElementById('screen-wallet').classList.contains('flex')) {
+                        skipWallet();
+                    }
+                } else {
+                    state.user.wallet = null;
+                    state.user.walletIsConnected = false;
+                }
+                updateUI();
+            });
+            
+            // Start simulation of other people opening cases
+            startMultiplayerSim();
+            router.push('cases');
+        }
+
+
+        // --- AUTH FLOW ---
+        const tg = window.Telegram.WebApp;
+
+        function handleTelegramLogin() {
+            document.getElementById('screen-auth').classList.add('hidden');
+            document.getElementById('screen-wallet').classList.remove('hidden');
+            document.getElementById('screen-wallet').classList.add('flex');
+            // If TonConnect is already connected, it will auto-call skipWallet via the listener
+        }
+
+        function skipWallet() {
+            document.getElementById('screen-wallet').classList.add('hidden');
+            document.getElementById('screen-app').classList.remove('hidden');
+            document.getElementById('screen-app').classList.add('flex');
+            updateUI();
+        }
+
+        // --- FIREBASE WRITE OPERATIONS ---
+        async function updateBalanceInDB(amount, type) {
+            if (!state.isAuthReady || !db) return;
+            const { doc, updateDoc, increment } = window.firebase;
+            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/data/profile`, 'userDoc');
+            
+            // Track stats
+            let updatePayload = {
+                balance: increment(amount),
+                lastUpdate: new Date()
+            };
+
+            if (type === 'win') {
+                updatePayload.totalWins = increment(1);
+            } else if (type === 'loss') {
+                updatePayload.totalLosses = increment(1);
+            }
+
+            try {
+                await updateDoc(userDocRef, updatePayload);
+            } catch(e) {
+                console.error("Error updating balance:", e);
+                tg.showAlert('Ошибка обновления баланса в базе данных.');
+            }
+        }
+
+        async function updateInventoryInDB(newInventory) {
+            if (!state.isAuthReady || !db) return;
+            const { doc, updateDoc } = window.firebase;
+            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/data/profile`, 'userDoc');
+            
+            try {
+                await updateDoc(userDocRef, {
+                    inventory: newInventory,
+                    lastUpdate: new Date()
+                });
+            } catch(e) {
+                console.error("Error updating inventory:", e);
+                tg.showAlert('Ошибка обновления инвентаря в базе данных.');
+            }
+        }
+
+        // --- CORE UI ---
+        function updateUI() {
+            document.getElementById('user-name').innerText = state.user.username;
+            const balEl = document.getElementById('balance');
+            
+            // Animate number change (simple update for now)
+            balEl.innerText = state.user.balance.toFixed(2);
+            
+            // Update modal balances if open
+            if (document.getElementById('modal-preview').classList.contains('flex')) {
+                document.getElementById('preview-balance').innerText = state.user.balance.toFixed(2);
+            }
+            
+            lucide.createIcons();
+        }
+
+        const router = {
+            push: (view) => {
+                const container = document.getElementById('app-view');
+                // Nav Styling
+                document.querySelectorAll('nav button').forEach(btn => {
+                    if (btn.id !== 'nav-admin') {
+                        btn.className = "flex-1 flex flex-col items-center gap-1 text-gray-500 transition-colors";
+                    }
+                });
+                const navBtn = document.getElementById('nav-' + view);
+                if (navBtn) {
+                    navBtn.className = "flex-1 flex flex-col items-center gap-1 text-ton transition-colors";
+                }
+
+                if (view === 'cases') renderCases(container);
+                if (view === 'inventory') renderInventory(container);
+                if (view === 'wallet') renderWallet(container);
+                if (view === 'referral') renderReferral(container);
+                if (view === 'support') renderSupport(container);
+                if (view === 'admin' && state.user.isAdmin) renderAdminPanel(container);
+                else if (view === 'admin') router.push('cases'); // Redirect if not admin
+                
+                lucide.createIcons();
+            }
+        };
+
+        // --- RENDERERS ---
+        function renderCases(container) {
+            container.innerHTML = `
+                <div class="animate-fade-in pb-10">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold">NFT Коллекции</h2>
+                        <p class="text-sm text-gray-400">Официальные Telegram Gifts</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        ${CASES.map(c => `
+                            <div onclick="openPreview('${c.id}')" class="relative group cursor-pointer rounded-2xl bg-surface border border-white/5 p-4 flex flex-col items-center gap-4 hover:border-ton/50 transition-all overflow-hidden">
+                                <div class="absolute inset-0 bg-gradient-to-b from-ton/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                
+                                <div class="text-6xl drop-shadow-2xl transition-transform group-hover:scale-110 duration-300 group-active:scale-95">${c.image}</div>
+                                
+                                <div class="z-10 text-center w-full">
+                                    <div class="font-bold text-white truncate">${c.name}</div>
+                                    <div class="mt-2 inline-flex items-center gap-1 px-3 py-1 bg-black/40 rounded-lg border border-white/5">
+                                        <span class="text-white font-mono font-bold text-sm">${c.price}</span>
+                                        <img src="https://ton.org/download/ton_symbol.svg" class="w-3 h-3">
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderInventory(container) {
+            if (state.user.inventory.length === 0) {
+                container.innerHTML = `
+                    <div class="h-[60vh] flex flex-col items-center justify-center text-gray-500 animate-fade-in">
+                        <i data-lucide="image" class="w-16 h-16 mb-4 opacity-20"></i>
+                        <h3 class="text-lg font-bold text-gray-400">Нет NFT</h3>
+                        <p class="text-xs mb-6">Открывайте кейсы, чтобы выиграть Telegram Gifts</p>
+                        <button onclick="router.push('cases')" class="px-6 py-2 bg-surface border border-white/10 rounded-lg text-white text-sm">К рынку</button>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 animate-slide-up">
+                    ${state.user.inventory.slice().reverse().map((item, index) => `
+                        <div class="nft-${item.rarity} rounded-xl p-3 flex flex-col items-center relative group">
+                            <div class="text-4xl mb-2 group-hover:scale-110 transition-transform">${item.icon}</div>
+                            <div class="text-xs font-bold text-white truncate w-full text-center">${item.name}</div>
+                            <div class="mt-2 w-full flex gap-2">
+                                <button onclick="sellItem(${item.timestamp}, ${item.price})" class="flex-1 bg-black/50 hover:bg-red-500/80 text-[10px] py-1.5 rounded text-white transition-colors">
+                                    Продать ${item.price} TON
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderWallet(container) {
+            const walletAddress = state.user.wallet ? state.user.wallet.substring(0, 8) + '...' + state.user.wallet.slice(-4) : 'Не подключен';
+            
+            container.innerHTML = `
+                <div class="animate-fade-in">
+                    <div class="bg-gradient-to-br from-[#0098EA] to-[#007AFF] rounded-2xl p-6 text-white shadow-lg mb-6 relative overflow-hidden">
+                        <div class="absolute -right-10 -top-10 w-40 h-40 bg-white/20 rounded-full blur-2xl"></div>
+                        <p class="text-blue-100 text-xs font-medium mb-1">Общий баланс</p>
+                        <h2 class="text-4xl font-bold flex items-center gap-2 mb-6">
+                            ${state.user.balance.toFixed(2)} <span class="text-2xl opacity-80">TON</span>
+                        </h2>
+                        <div class="text-xs font-mono text-white/70 mb-4 truncate">
+                            Кошелек: ${walletAddress}
+                        </div>
+                        <div class="flex gap-3 relative z-10">
+                            <button onclick="openDepositModal()" class="flex-1 bg-white/20 hover:bg-white/30 py-3 rounded-xl font-bold backdrop-blur-sm transition-colors flex items-center justify-center gap-2">
+                                <i data-lucide="arrow-down-circle" class="w-4 h-4"></i> Пополнить
+                            </button>
+                            <button onclick="openWithdrawModal()" ${!state.user.wallet ? 'disabled' : ''} class="flex-1 ${!state.user.wallet ? 'bg-gray-500/20 text-gray-500 cursor-not-allowed' : 'bg-black/20 hover:bg-black/30'} py-3 rounded-xl font-bold backdrop-blur-sm transition-colors flex items-center justify-center gap-2">
+                                <i data-lucide="arrow-up-circle" class="w-4 h-4"></i> Вывести
+                            </button>
+                        </div>
+                    </div>
+
+                    <h3 class="font-bold mb-3">История транзакций (симуляция)</h3>
+                    <div class="space-y-2 opacity-50">
+                        <div class="bg-surface p-3 rounded-xl flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                <div class="p-2 bg-green-500/20 rounded-lg"><i data-lucide="plus" class="w-4 h-4 text-green-500"></i></div>
+                                <div class="text-sm">
+                                    <div class="font-bold">Пополнение</div>
+                                    <div class="text-xs text-gray-500">Сегодня, 10:20</div>
+                                </div>
+                            </div>
+                            <span class="text-green-400 font-mono text-sm">+15.00 TON</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+        
+        function renderReferral(container) {
+            state.user.referralLink = `https://ton.gifts/ref?id=${userId}`;
+            const link = state.user.referralLink;
+
+            container.innerHTML = `
+                <div class="animate-fade-in p-4 bg-surface rounded-2xl mt-4">
+                    <h2 class="text-2xl font-bold mb-4">Реферальная программа</h2>
+                    <p class="text-gray-400 mb-6">Приглашайте друзей и получайте 5% от их трат на кейсы!</p>
+
+                    <label class="block text-sm font-medium mb-2">Ваша реферальная ссылка:</label>
+                    <div class="bg-surface2 p-3 rounded-lg flex justify-between items-center border border-ton mb-6">
+                        <span id="referral-link" class="font-mono text-xs text-ton truncate mr-2">${link}</span>
+                        <button onclick="copyToClipboard('${link}', 'Copied')" class="p-1 bg-ton/20 rounded hover:bg-ton/40 transition-colors" title="Копировать">
+                            <i data-lucide="copy" class="w-4 h-4 text-ton"></i>
+                        </button>
+                    </div>
+
+                    <h3 class="font-bold mb-3">Ваши рефералы (симуляция)</h3>
+                    <div class="space-y-2 text-gray-500">
+                        <p class="text-xs">Здесь будут отображаться ваши активные рефералы и ваш доход.</p>
+                        <div class="flex justify-between text-sm bg-surface2 p-3 rounded-lg">
+                            <span>Приглашено:</span>
+                            <span class="font-bold">3 чел.</span>
+                        </div>
+                        <div class="flex justify-between text-sm bg-surface2 p-3 rounded-lg">
+                            <span>Общий доход:</span>
+                            <span class="font-bold text-green-400">12.50 TON</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function renderSupport(container) {
+            container.innerHTML = `
+                <div class="animate-fade-in p-4 bg-surface rounded-2xl mt-4">
+                    <h2 class="text-2xl font-bold mb-4">Поддержка</h2>
+                    <p class="text-gray-400 mb-6">Свяжитесь с нами, если у вас возникли вопросы или проблемы. Мы всегда готовы помочь!</p>
+
+                    <div class="space-y-4">
+                        <div class="p-4 bg-surface2 rounded-lg flex items-center gap-4">
+                            <i data-lucide="send" class="w-6 h-6 text-ton"></i>
+                            <div>
+                                <h4 class="font-bold">Telegram Support</h4>
+                                <a href="https://t.me/your_support_bot" target="_blank" class="text-ton text-sm hover:underline">@support_ton_gifts</a>
+                            </div>
+                        </div>
+                        <div class="p-4 bg-surface2 rounded-lg flex items-center gap-4">
+                            <i data-lucide="mail" class="w-6 h-6 text-ton"></i>
+                            <div>
+                                <h4 class="font-bold">Email</h4>
+                                <span class="text-gray-400 text-sm">support@tongifts.com</span>
+                            </div>
+                        </div>
+                        <div class="p-4 bg-surface2 rounded-lg">
+                            <h4 class="font-bold mb-2">Ваш User ID (для быстрого поиска)</h4>
+                            <div class="font-mono text-xs text-gray-500 break-all">${userId}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+        
+        function renderAdminPanel(container) {
+            const { totalProfit, totalLoss, totalCases, topWinners } = state.stats;
+
+            container.innerHTML = `
+                <div class="animate-fade-in p-4 mt-4">
+                    <h2 class="text-2xl font-bold mb-4 text-red-500">Админ-панель</h2>
+                    <p class="text-gray-400 mb-6">Управление и аналитика системы.</p>
+                    
+                    <h3 class="font-bold mb-3 text-lg">Ключевые метрики</h3>
+                    <div class="grid grid-cols-2 gap-4 mb-8">
+                        <div class="bg-surface p-4 rounded-xl border border-green-500/30">
+                            <p class="text-sm text-gray-400">Чистая прибыль (TON)</p>
+                            <p class="text-2xl font-bold text-green-400">${(totalProfit - totalLoss).toFixed(2)}</p>
+                        </div>
+                        <div class="bg-surface p-4 rounded-xl border border-ton/30">
+                            <p class="text-sm text-gray-400">Всего открыто кейсов</p>
+                            <p class="text-2xl font-bold text-ton">${totalCases}</p>
+                        </div>
+                    </div>
+
+                    <h3 class="font-bold mb-3 text-lg">Топ победителей</h3>
+                    <ul class="space-y-3 mb-8">
+                        ${topWinners.map((w, i) => `
+                            <li class="bg-surface p-3 rounded-lg flex justify-between items-center">
+                                <span class="font-bold">${i+1}. ${w.name}</span>
+                                <span class="text-green-400">${w.profit.toFixed(2)} TON</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+
+                    <h3 class="font-bold mb-3 text-lg">Действия</h3>
+                    <div class="space-y-4">
+                        <div class="p-4 bg-surface rounded-xl border border-white/10">
+                            <h4 class="font-bold mb-2">Выдать TON</h4>
+                            <input type="text" id="target-id-ton" placeholder="User ID" class="w-full bg-surface2 p-2 rounded-lg mb-2 text-sm">
+                            <input type="number" id="amount-ton" placeholder="Сумма TON" value="10" class="w-full bg-surface2 p-2 rounded-lg mb-3 text-sm">
+                            <button onclick="adminGiveTon()" class="w-full py-2 bg-ton rounded-lg text-sm font-bold">Выдать</button>
+                        </div>
+                        <div class="p-4 bg-surface rounded-xl border border-white/10">
+                            <h4 class="font-bold mb-2">Заблокировать пользователя</h4>
+                            <input type="text" id="target-id-ban" placeholder="User ID" class="w-full bg-surface2 p-2 rounded-lg mb-3 text-sm">
+                            <button onclick="adminBanUser()" class="w-full py-2 bg-red-600 rounded-lg text-sm font-bold">Заблокировать</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- CASE LOGIC ---
+        function openPreview(id) {
+            const box = CASES.find(c => c.id === id);
+            state.currentCase = box;
+            
+            document.getElementById('preview-title').innerText = box.name;
+            document.getElementById('preview-price').innerText = box.price;
+            document.getElementById('preview-image').innerText = box.image;
+            
+            const grid = document.getElementById('preview-grid');
+            grid.innerHTML = box.drops.map(itemId => {
+                const item = NFTS.find(i => i.id === itemId);
+                return `
+                    <div class="bg-surface border border-white/5 rounded-xl p-3 flex flex-col items-center gap-2 nft-${item.rarity}">
+                        <div class="text-3xl">${item.icon}</div>
+                        <div class="text-[10px] text-center font-bold text-gray-300 leading-tight">${item.name}</div>
+                        <div class="text-[10px] text-ton font-mono">${item.price} TON</div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('btn-open-case').onclick = runRoulette;
+            
+            const modal = document.getElementById('modal-preview');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            updateUI();
+            lucide.createIcons();
+        }
+
+        async function runRoulette() {
+            if (state.user.balance < state.currentCase.price) {
+                tg.showAlert('Недостаточно средств. Пополните баланс.');
+                return;
+            }
+
+            // 1. DEDUCT BALANCE (Loss)
+            await updateBalanceInDB(-state.currentCase.price, 'loss');
+            
+            document.getElementById('modal-preview').classList.add('hidden');
+            document.getElementById('modal-preview').classList.remove('flex');
+
+            // 2. Determine Win
+            const drops = state.currentCase.drops;
+            let winId;
+            const rand = Math.random();
+            if (rand < 0.05) winId = drops[drops.length-1]; // 5% best
+            else if (rand < 0.20) winId = drops[drops.length-2]; // 15% second best
+            else winId = drops[Math.floor(Math.random() * (drops.length - 2))]; // rest common
+
+            state.winItem = NFTS.find(i => i.id === winId);
+
+            // 3. Run Animation
+            const strip = document.getElementById('roulette-strip');
+            let html = '';
+            const totalCards = 60;
+            const winIndex = 50;
+            
+            for(let i=0; i<totalCards; i++) {
+                let item;
+                if(i === winIndex) item = state.winItem;
+                else item = NFTS.find(n => n.id === drops[Math.floor(Math.random()*drops.length)]);
+                
+                html += `
+                    <div class="w-32 h-40 flex-shrink-0 bg-surface border-2 ${i === winIndex ? 'border-yellow-500 bg-yellow-500/10' : 'border-white/5'} rounded-xl flex flex-col items-center justify-center relative">
+                        <div class="text-5xl mb-2">${item.icon}</div>
+                        <div class="text-xs font-bold text-center px-2">${item.name}</div>
+                    </div>
+                `;
+            }
+            strip.innerHTML = html;
+
+            const modal = document.getElementById('modal-roulette');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            strip.style.transition = 'none';
+            strip.style.transform = 'translateX(0)';
+            strip.offsetHeight; 
+
+            const cardWidth = 128 + 16;
+            const centerOffset = (window.innerWidth / 2) - (cardWidth / 2);
+            const targetX = -((winIndex * cardWidth) - centerOffset);
+
+            strip.style.transition = 'transform 5s cubic-bezier(0.1, 1, 0.3, 1)';
+            strip.style.transform = `translateX(${targetX}px)`;
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                showWinScreen();
+            }, 5500);
+        }
+
+        function showWinScreen() {
+            const item = state.winItem;
+            const modal = document.getElementById('modal-win');
+            
+            document.getElementById('win-icon').innerText = item.icon;
+            document.getElementById('win-name').innerText = item.name;
+            document.getElementById('win-price').innerText = item.price;
+            document.getElementById('win-rarity').innerText = item.rarity + " NFT";
+            document.getElementById('win-rarity').className = `text-sm font-bold uppercase tracking-[0.2em] mb-2 ${item.color}`;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // Current user win must be broadcast
+            broadcastWinToFeed(state.user.username, item);
+        }
+
+        async function sellWin() {
+            // Sell: add price to balance
+            await updateBalanceInDB(state.winItem.price, 'win');
+            closeModal('modal-win');
+            tg.showAlert(`Продано за ${state.winItem.price} TON`);
+        }
+
+        async function keepWin() {
+            // Keep: add to inventory
+            const newItem = { ...state.winItem, timestamp: Date.now() };
+            const newInventory = [...state.user.inventory, newItem];
+            await updateInventoryInDB(newInventory);
+            closeModal('modal-win');
+            tg.showAlert(`NFT "${state.winItem.name}" добавлен в инвентарь!`);
+        }
+
+        async function sellItem(timestamp, price) {
+            const newInventory = state.user.inventory.filter(i => i.timestamp !== timestamp);
+            await updateInventoryInDB(newInventory);
+            await updateBalanceInDB(price, 'win');
+            tg.showAlert(`NFT продан за ${price} TON`);
+            router.push('inventory');
+        }
+
+        // --- MULTIPLAYER & FEED ---
+        function startMultiplayerSim() {
+            // No initial population from simulation, rely on Firestore
+            // Interval for bot simulation (adds to public feed)
+            setInterval(() => {
+                if(Math.random() > 0.7 && state.isAuthReady) simulateOtherPlayer();
+            }, 4000);
+        }
+
+        function simulateOtherPlayer() {
+            const user = BOTS[Math.floor(Math.random() * BOTS.length)];
+            const item = NFTS[Math.floor(Math.random() * NFTS.length)];
+            broadcastWinToFeed(user, item);
+        }
+
+        async function broadcastWinToFeed(username, item) {
+            if (!db) return;
+            const { collection, addDoc } = window.firebase;
+            const feedColRef = collection(db, `artifacts/${appId}/public/data/feed`);
+            
+            try {
+                await addDoc(feedColRef, {
+                    username: username,
+                    itemId: item.id,
+                    itemName: item.name,
+                    itemIcon: item.icon,
+                    itemRarity: item.rarity,
+                    timestamp: Date.now()
+                });
+            } catch(e) {
+                console.error("Error writing to feed:", e);
+            }
+        }
+
+        function renderLiveFeed() {
+            const feed = document.getElementById('live-feed');
+            feed.innerHTML = state.feedItems.map(f => {
+                const isCurrentUser = f.username === state.user.username;
+                const borderClass = isCurrentUser ? 'border-ton' : 'border-white/10';
+                const bgClass = isCurrentUser ? 'bg-ton/20' : 'bg-surface';
+                
+                return `
+                    <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full ${bgClass} border ${borderClass} flex-shrink-0">
+                        <span class="text-xs text-gray-400 font-bold max-w-[80px] truncate ${isCurrentUser ? 'text-white' : ''}">${f.username}</span>
+                        <span class="text-base">${f.itemIcon}</span>
+                        <span class="text-xs font-bold text-green-400">${f.itemName}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- DEPOSIT/WITHDRAWAL LOGIC (TON CONNECT) ---
+        function openDepositModal() {
+            if (!state.user.walletIsConnected) {
+                tg.showAlert('Пожалуйста, сначала подключите TON-кошелек!');
+                router.push('wallet');
+                return;
+            }
+            document.getElementById('modal-deposit').classList.remove('hidden');
+            document.getElementById('modal-deposit').classList.add('flex');
+        }
+        
+        function openWithdrawModal() {
+            if (!state.user.walletIsConnected || !state.user.wallet) {
+                tg.showAlert('Для вывода необходимо подключить TON-кошелек.');
+                router.push('wallet');
+                return;
+            }
+            document.getElementById('withdraw-address').innerText = state.user.wallet;
+            document.getElementById('modal-withdraw').classList.remove('hidden');
+            document.getElementById('modal-withdraw').classList.add('flex');
+        }
+
+        // We simulate TON Connect operations as we cannot sign real transactions in this environment.
+        async function simulateDeposit() {
+            if (!tonConnectUI.connected) {
+                tg.showAlert('Кошелек не подключен. Сначала подключитесь через TonConnect.');
+                return;
+            }
+            
+            // In a real app, you would send a transaction request here:
+            // tonConnectUI.sendTransaction({ messages: [...], validUntil: ... });
+            // And then monitor the blockchain for confirmation.
+            
+            // SIMULATION: Add 10 TON to balance
+            await updateBalanceInDB(10.00, 'deposit');
+            closeModal('modal-deposit');
+            tg.showAlert('Пополнение +10 TON симулировано успешно!');
+        }
+        
+        async function simulateWithdrawal() {
+            const amount = parseFloat(document.getElementById('withdraw-amount').value);
+            if (!state.user.walletIsConnected || !state.user.wallet) return tg.showAlert('Кошелек не подключен.');
+            if (isNaN(amount) || amount <= 0) return tg.showAlert('Введите корректную сумму.');
+            if (amount > state.user.balance) return tg.showAlert('Недостаточно средств на балансе.');
+            
+            // In a real app, you would sign and send a transaction from your backend to transfer
+            // TON to the user's connected wallet address (state.user.wallet).
+            
+            // SIMULATION: Deduct amount from balance
+            await updateBalanceInDB(-amount, 'withdrawal');
+            closeModal('modal-withdraw');
+            tg.showAlert(`Вывод ${amount.toFixed(2)} TON на ваш кошелек ${state.user.wallet.slice(-4)} симулирован успешно.`);
+        }
+
+        // --- ADMIN ACTIONS (SIMULATED) ---
+        function adminGiveTon() {
+            const targetId = document.getElementById('target-id-ton').value.trim();
+            const amount = parseFloat(document.getElementById('amount-ton').value);
+            if (!targetId || isNaN(amount) || amount <= 0) return tg.showAlert('Некорректный ID или сумма.');
+
+            // SIMULATION: In real life, this would require cross-user access (admin rules).
+            // Here, we just log and pretend.
+            console.log(`ADMIN ACTION: Giving ${amount} TON to User ID: ${targetId}`);
+            tg.showAlert(`[ADMIN] Выдано ${amount} TON пользователю ${targetId} (симуляция).`);
+        }
+
+        function adminBanUser() {
+            const targetId = document.getElementById('target-id-ban').value.trim();
+            if (!targetId) return tg.showAlert('Введите User ID.');
+            
+            // SIMULATION: Set a ban flag in a user's profile document.
+            console.log(`ADMIN ACTION: Banning User ID: ${targetId}`);
+            tg.showAlert(`[ADMIN] Пользователь ${targetId} заблокирован (симуляция).`);
+        }
+
+        // --- UTILS ---
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+            document.getElementById(id).classList.remove('flex');
+        }
+
+        function copyToClipboard(text, message) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                tg.showAlert(message || 'Скопировано!');
+            } catch (err) {
+                console.error('Could not copy text: ', err);
+                tg.showAlert('Не удалось скопировать.');
+            }
+            document.body.removeChild(textarea);
+        }
+        
+        // Initial icon rendering
+        lucide.createIcons();
+    </script>
+</body>
+</html>
